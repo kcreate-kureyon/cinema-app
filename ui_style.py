@@ -70,6 +70,9 @@ h1, h2, h3, h4, .app-title, [data-baseweb="tab"] p, .stButton button p, .stDownl
 .hall-info {{ font-size: 13px; color: {INK}; margin: 2px 0 10px; }}
 .band {{ background: {BROWN}; color: #fff; font-weight: 700; padding: 6px 14px; border-radius: 4px; margin: 4px 0 10px; display: inline-block; }}
 .app-title {{ font-family: 'Zen Maru Gothic', sans-serif; font-size: 34px; font-weight: 700; color: {BROWN}; margin: 4px 0 8px; }}
+
+.start-card {{ background: rgba(255,255,255,.8); border: 2px solid {BROWN}; border-radius: 14px; padding: 16px 18px; min-height: 110px; font-size: 15px; }}
+.start-title {{ font-family: 'Zen Maru Gothic', sans-serif; font-size: 24px; font-weight: 700; color: {BROWN}; margin-bottom: 6px; }}
 .cine-note {{ background: {CREAM}; border-left: 6px solid {BROWN}; padding: 8px 12px; border-radius: 4px; font-size: 14px; }}
 </style>
 """, unsafe_allow_html=True)

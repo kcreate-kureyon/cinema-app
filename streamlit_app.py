@@ -7,7 +7,6 @@ import io
 import os
 import unicodedata
 
-import pandas as pd
 import streamlit as st
 from PIL import Image
 
@@ -22,22 +21,40 @@ ui.apply()  # 見た目をシネマの原稿に合わせる
 KEYS = cio.KEYS
 HALLS = core.HALLS
 FIELDS = ["title", "date", "director_name", "cast_kind", "cast_name", "body", "copy"]
-TABLE_COLS = ["公開日", "作品名", "木曽川", "各務原", "岐阜", "稲沢"]
-COL2KEY = {"木曽川": "kiso", "各務原": "kaka", "岐阜": "gifu", "稲沢": "ina"}
+SHORT = {"kiso": "木曽川", "kaka": "各務原", "gifu": "岐阜", "ina": "稲沢"}
 
 # ---------------------------------------------------------------- 状態
-def blank_table():
-    return pd.DataFrame([{"公開日": "", "作品名": "", "木曽川": False, "各務原": False, "岐阜": False, "稲沢": False}])
-
+# 上映作品の表は、1作品＝1行の普通の入力欄で持つ（YOU 2026-10-28「Enterおすと消えちゃう」：
+# 表の形の入力欄 data_editor は、日本語の変換中のEnterで入力が閉じる・中身を渡し直すと消えることがあった）
 def init():
     ss = st.session_state
     ss.setdefault("issue", "")
     ss.setdefault("images", {})
-    ss.setdefault("table_df", blank_table())
-    ss.setdefault("table_ver", 0)
+    ss.setdefault("row_ids", [0])
+    ss.setdefault("next_id", 1)
     for k in KEYS:
         for f in FIELDS:
             ss.setdefault(f"{k}_{f}", "出演" if f == "cast_kind" else "")
+    for rid in ss["row_ids"]:
+        init_row(rid)
+
+def init_row(rid, r=None):
+    ss = st.session_state
+    r = r or {}
+    ss.setdefault(f"r{rid}_date", r.get("date", ""))
+    ss.setdefault(f"r{rid}_title", r.get("title", ""))
+    for k in KEYS:
+        ss.setdefault(f"r{rid}_{k}", bool(r.get("dots", {}).get(k)))
+
+def set_rows(rows):
+    ss = st.session_state
+    for rid in ss.get("row_ids", []):
+        for f in ["date", "title"] + KEYS:
+            ss.pop(f"r{rid}_{f}", None)
+    ids = list(range(ss.get("next_id", 1), ss.get("next_id", 1) + max(1, len(rows))))
+    ss["row_ids"], ss["next_id"] = ids, ids[-1] + 1
+    for rid, r in zip(ids, rows or [{}]):
+        init_row(rid, r)
 
 def load_into_state(data, images=None):
     """data（cinema_core の形）を画面に入れる"""
@@ -56,10 +73,7 @@ def load_into_state(data, images=None):
         ss[f"{k}_body"] = t.get("body", "")
         ss[f"{k}_copy"] = t.get("copy", "")
     if data.get("table"):
-        rows = [{"公開日": r.get("date", ""), "作品名": r.get("title", ""),
-                 **{c: bool(r.get("dots", {}).get(COL2KEY[c])) for c in COL2KEY}} for r in data["table"]]
-        ss["table_df"] = pd.DataFrame(rows, columns=TABLE_COLS)
-        ss["table_ver"] += 1
+        set_rows(data["table"])
     if images:
         ss["images"].update(images)
 
@@ -72,14 +86,13 @@ def collect():
                  "director": "監督／" + ss[f"{k}_director_name"].strip(),
                  "cast": ss[f"{k}_cast_kind"] + "／" + ss[f"{k}_cast_name"].strip(),
                  "body": ss[f"{k}_body"], "copy": ss[f"{k}_copy"]}
-    df = ss["table_df"]
     table = []
-    for _, r in df.iterrows():
-        title = str(r.get("作品名") or "").strip()
+    for rid in ss["row_ids"]:
+        title = (ss.get(f"r{rid}_title") or "").strip()
         if not title:
             continue
-        table.append({"date": str(r.get("公開日") or ""), "title": title,
-                      "dots": {COL2KEY[c]: bool(r.get(c)) for c in COL2KEY}})
+        table.append({"date": ss.get(f"r{rid}_date") or "", "title": title,
+                      "dots": {k: bool(ss.get(f"r{rid}_{k}")) for k in KEYS}})
     return {"issue": ss["issue"], "theaters": th, "table": table}
 
 def reset():
@@ -138,8 +151,27 @@ if "_pending" in ss:
     load_into_state(_d, _i)
     st.toast(_msg, icon="✅")
 
-# ---------------------------------------------------------------- 上：号と読み込み
+# ---------------------------------------------------------------- 最初の画面（YOU 2026-10-28「続きから修正」「新しい号の作成」）
 ui.header()
+if not ss.get("_started"):
+    st.markdown("<div class='cine-note'>入力すると、くれよん「映画館が選ぶ 今月の1本。」のページの形でPDFができます</div>", unsafe_allow_html=True)
+    st.write("")
+    s1, s2 = st.columns(2)
+    with s1:
+        st.markdown("<div class='start-card'><div class='start-title'>📂 続きから修正</div>前にダウンロードした【原稿データ】（.zip）を入れると、その続きから直せます</div>", unsafe_allow_html=True)
+        z = st.file_uploader("原稿データ（.zip）", type=["zip"], key="start_zip")
+        if z and st.button("続きから修正する", type="primary", width="stretch"):
+            data, imgs = cio.from_zip(z.getvalue())
+            ss["_pending"] = (data, imgs, "原稿データを読み込みました。続きから直せます。")
+            ss["_started"] = True; st.rerun()
+    with s2:
+        st.markdown("<div class='start-card'><div class='start-title'>🆕 新しい号の作成</div>空の状態から作ります（翌月の新しい原稿）。テキストとスケジュールのファイルは、次の画面で読み込めます</div>", unsafe_allow_html=True)
+        st.write("")
+        if st.button("新しい号を作る", type="primary", width="stretch"):
+            reset(); ss["_started"] = True; st.rerun()
+    st.stop()
+
+# ---------------------------------------------------------------- 上：号と読み込み
 st.markdown("<div class='cine-note'>入力すると、くれよん「映画館が選ぶ 今月の1本。」のページの形でPDFができます</div>", unsafe_allow_html=True)
 st.write("")
 
@@ -147,17 +179,18 @@ c1, c2 = st.columns([1, 3])
 with c1:
     st.text_input("号（例：2612）", key="issue", max_chars=4)
 with c2:
-    with st.expander("📂 ファイルから読み込む（前回の原稿データ／シネマ担当者のテキスト・スケジュール）"):
-        up_zip = st.file_uploader("前回ダウンロードした【原稿データ】（.zip）…直しの続きから始めるとき", type=["zip"], key="up_zip")
-        if up_zip and st.button("この原稿データを読み込む"):
-            data, imgs = cio.from_zip(up_zip.getvalue())
-            ss["_pending"] = (data, imgs, "原稿データを読み込みました。続きから直せます。"); st.rerun()
+    with st.expander("📂 シネマ担当者のテキスト・スケジュールを読み込む"):
         up_docx = st.file_uploader("4作品のテキスト（.docx）", type=["docx"], key="up_docx")
         if up_docx and st.button("テキストを読み込む"):
             ss["_pending"] = ({"theaters": cio.read_docx(up_docx.getvalue())}, None, "4作品のテキストを入れました。"); st.rerun()
         up_xlsx = st.file_uploader("上映スケジュール（.xlsx）", type=["xlsx"], key="up_xlsx")
         if up_xlsx and st.button("スケジュールを読み込む"):
             ss["_pending"] = ({"table": cio.read_xlsx(up_xlsx.getvalue())}, None, "上映作品の表を入れました。"); st.rerun()
+
+with st.popover("🏠 最初の画面にもどる"):
+    st.write("入力した中身と画像は消えます。**先に原稿データをダウンロードしてから**にしてください。")
+    if st.button("もどる", type="primary"):
+        reset(); st.rerun()
 
 tabs = st.tabs(["① 木曽川", "② 各務原", "③ 岐阜", "④ 稲沢", "⑤ 上映作品の表", "⑥ 確認・ダウンロード"])
 
@@ -195,12 +228,22 @@ with tabs[4]:
     ui.band("上映作品名")
     st.markdown("公開日は、その日の**最初の作品の行だけ**に入れます（例：12/4(金)）。25作品まで。作品の数だけ段ができます。")
     st.caption("「～12/10(木)」のような上映終了日は自動で取ります。スペースは自動で全角（長すぎる作品は半角）になります。")
-    df = st.data_editor(ss["table_df"], num_rows="dynamic", width="stretch", key=f"table_editor_{ss['table_ver']}",
-                        column_config={"公開日": st.column_config.TextColumn(width="small"),
-                                       "作品名": st.column_config.TextColumn(width="large"),
-                                       **{c: st.column_config.CheckboxColumn(c, default=False) for c in COL2KEY}})
-    ss["table_df"] = df
-    n = sum(1 for t in df["作品名"].fillna("") if str(t).strip())
+    w = [1.3, 5, .8, .8, .8, .8, .6]
+    h = st.columns(w)
+    for col, lab in zip(h, ["公開日", "作品名"] + [SHORT[k] for k in KEYS] + [""]):
+        col.markdown(f"**{lab}**")
+    for n, rid in enumerate(list(ss["row_ids"]), 1):
+        c = st.columns(w, vertical_alignment="center")
+        c[0].text_input(f"公開日{n}", key=f"r{rid}_date", label_visibility="collapsed")
+        c[1].text_input(f"作品名{n}", key=f"r{rid}_title", label_visibility="collapsed")
+        for j, k in enumerate(KEYS):
+            c[2 + j].checkbox(f"{SHORT[k]}{n}", key=f"r{rid}_{k}", label_visibility="collapsed")
+        if c[6].button("✕", key=f"r{rid}_del", help="この行を消す"):
+            ss["row_ids"].remove(rid); st.rerun()
+    b1, b2 = st.columns([1, 3])
+    if b1.button("＋ 作品を1行足す", width="stretch"):
+        rid = ss["next_id"]; ss["next_id"] += 1; ss["row_ids"].append(rid); init_row(rid); st.rerun()
+    n = sum(1 for rid in ss["row_ids"] if (ss.get(f"r{rid}_title") or "").strip())
     (st.error if n > 25 else st.caption)(f"いま {n} 作品" + ("（25作品までにしてください）" if n > 25 else ""))
 
 # ---------------------------------------------------------------- 確認・ダウンロード
@@ -226,18 +269,13 @@ with tabs[5]:
             for m in infos:
                 st.write("・" + m)
     name = f"{data['issue'] or '0000'}シネマ"
-    d1, d2, d3 = st.columns(3)
+    d1, d2 = st.columns(2)
     with d1:
         st.download_button("📄 PDFをダウンロード（お客さん確認用）", pdf, file_name=f"{name}.pdf", mime="application/pdf",
                            width="stretch", on_click="ignore")
     with d2:
         st.download_button("💾 原稿データをダウンロード（直しの続き・高橋さんへ）", cio.to_zip(data, ss["images"]),
                            file_name=f"{name}_原稿データ.zip", mime="application/zip", width="stretch", on_click="ignore")
-    with d3:
-        with st.popover("🗑 リセット（翌月の新しい原稿）", width="stretch"):
-            st.write("入力した中身と画像を全部消します。**先に原稿データをダウンロードしてから**にしてください。")
-            if st.button("全部消して新しく始める", type="primary"):
-                reset(); st.rerun()
     st.caption("OKになったら、PDFと原稿データの2つを高橋さんにメールしてください。")
 
     # ---- AIチェック（お知らせ。自動では直さない・失敗してもPDFには関係ない）

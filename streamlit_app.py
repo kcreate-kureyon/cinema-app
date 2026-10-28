@@ -5,6 +5,7 @@
 import hmac
 import io
 import os
+import unicodedata
 
 import pandas as pd
 import streamlit as st
@@ -101,6 +102,11 @@ def app_password():
         pass
     return os.environ.get("CINEMA_APP_PASSWORD", "")
 
+def _kana(t):
+    """全角半角をそろえ、ひらがなはカタカナにして比べる（ぽっぷこーん＝ポップコーン）"""
+    t = unicodedata.normalize("NFKC", t).strip()
+    return "".join(chr(ord(c) + 0x60) if "ぁ" <= c <= "ゖ" else c for c in t)
+
 def gate():
     pw = app_password()
     if st.session_state.get("_ok"):
@@ -112,9 +118,10 @@ def gate():
         st.error("合言葉がまだ設定されていません（高橋さんに連絡してください）")
         st.stop()
     st.title("🎬 シネマ原稿アプリ")
-    v = st.text_input("合言葉を入れてください", type="password")
+    # パスワード欄（type="password"）だとブラウザが日本語入力を止めるので、普通の欄にする（YOU 2026-10-28）
+    v = st.text_input("合言葉を入れてください（ひらがな・カタカナどちらでもOK）")
     if v:
-        if hmac.compare_digest(v.strip().encode("utf-8"), pw.strip().encode("utf-8")):  # 日本語の合言葉でも比べられるようにbytesで
+        if hmac.compare_digest(_kana(v).encode("utf-8"), _kana(pw).encode("utf-8")):  # 日本語の合言葉でも比べられるようにbytesで
             st.session_state["_ok"] = True
             st.rerun()
         st.error("合言葉がちがいます")

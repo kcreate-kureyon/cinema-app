@@ -110,15 +110,16 @@ def load_into_state(data, images=None):
     for k, t in data.get("theaters", {}).items():
         if k not in KEYS:
             continue
-        ss[f"{k}_title"] = t.get("title", "")
-        ss[f"{k}_date"] = t.get("date", "")
-        ss[f"{k}_director_name"] = (t.get("director") or "").replace("監督／", "", 1)
-        cast = t.get("cast") or ""
-        ss[f"{k}_cast_kind"] = "声の出演" if cast.startswith("声の出演") else "出演"
-        ss[f"{k}_cast_name"] = cast.split("／", 1)[1] if "／" in cast else cast
-        ss[f"{k}_body"] = t.get("body", "")
-        ss[f"{k}_copy"] = t.get("copy", "")
-        ss[f"{k}_orient"] = t.get("orient") or core.DEFAULT_ORIENT[k]
+        if "title" in t: ss[f"{k}_title"] = t.get("title") or ""
+        if "date" in t: ss[f"{k}_date"] = t.get("date") or ""
+        if "director" in t: ss[f"{k}_director_name"] = (t.get("director") or "").replace("監督／", "", 1)
+        if "cast" in t:
+            cast = t.get("cast") or ""
+            ss[f"{k}_cast_kind"] = "声の出演" if cast.startswith("声の出演") else "出演"
+            ss[f"{k}_cast_name"] = cast.split("／", 1)[1] if "／" in cast else cast
+        if "body" in t: ss[f"{k}_body"] = t.get("body") or ""
+        if "copy" in t: ss[f"{k}_copy"] = t.get("copy") or ""
+        if "orient" in t: ss[f"{k}_orient"] = t.get("orient") or core.DEFAULT_ORIENT[k]
     if data.get("table"):
         set_rows(data["table"])
     if images:
@@ -229,13 +230,55 @@ c1, c2 = st.columns([1, 3])
 with c1:
     st.text_input("号（例：2612）", key="issue", max_chars=4)
 with c2:
-    with st.expander("📂 シネマ担当者のテキスト・スケジュールを読み込む"):
-        up_docx = st.file_uploader("4作品のテキスト（.docx）", type=["docx"], key="up_docx")
-        if up_docx and st.button("テキストを読み込む"):
-            ss["_pending"] = ({"theaters": cio.read_docx(up_docx.getvalue())}, None, "4作品のテキストを入れました。"); st.rerun()
-        up_xlsx = st.file_uploader("上映スケジュール（.xlsx）", type=["xlsx"], key="up_xlsx")
-        if up_xlsx and st.button("スケジュールを読み込む"):
-            ss["_pending"] = ({"table": cio.read_xlsx(up_xlsx.getvalue())}, None, "上映作品の表を入れました。"); st.rerun()
+    with st.expander("📂 映画館から届いたファイルを読み込む（ある程度自動で入ります）", expanded=bool(ss.get("_import_report")) or not any(ss.get(f"{k}_title") for k in KEYS)):
+        st.caption("紹介文（.doc／.docx）と上映作品の一覧（.xlsx）を、何館ぶんでもまとめて入れられます。どの館かはファイル名の【各務原】などで見分けます。"
+                   "一覧は「号」の月の作品だけを表に入れ、公開日順に並べます。入ったあとは必ず中身を確かめて直してください。")
+        ups = st.file_uploader("映画館から届いたファイル", type=["doc", "docx", "xlsx"], accept_multiple_files=True, key="up_cinema")
+        if ups and st.button("読み込む", type="primary"):
+            month = int(ss["issue"][-2:]) if (ss.get("issue") or "").isdigit() and len(ss["issue"]) == 4 else None
+            theaters, report = {}, []
+            table = [{"date": ss.get(f"r{rid}_date") or "", "title": ss.get(f"r{rid}_title") or "",
+                      "dots": {k: bool(ss.get(f"r{rid}_{k}")) for k in KEYS}} for rid in ss["row_ids"]]
+            table_changed = False
+            for f in ups:
+                b, name = f.getvalue(), f.name
+                try:
+                    if name.lower().endswith(".xlsx"):
+                        head = " ".join(" ".join(r.values()) for r in cio.xlsx_rows(b)[:2])
+                        if sum(1 for x in ("木曽川", "各務原", "岐阜", "稲沢") if x in head) >= 2:   # シネマ担当者のスケジュール（4館の●）
+                            table = cio.read_xlsx(b); table_changed = True
+                            report.append(f"✅ {name}：上映作品の表を入れました（{len(table)}作品）")
+                            continue
+                        if month is None:
+                            report.append(f"⚠️ {name}：先に「号」を入れてください（号の月の作品だけを入れるため）"); continue
+                        key, items = cio.read_cinema_schedule(name, b, month)
+                        if not key:
+                            report.append(f"⚠️ {name}：どの映画館の一覧かわかりませんでした（ファイル名に【各務原】などを入れてください）"); continue
+                        table, added, marked = cio.merge_schedule(table, key, items); table_changed = True
+                        report.append(f"✅ {name}：{HALLS[key]}の{month}月の作品 {len(items)}本（新しく足した {added}・●を付けた {marked}）")
+                    else:
+                        text = cio.doc_text_of(name, b)
+                        if name.lower().endswith(".docx") and "作品／" in text:          # シネマ担当者のテキスト（4館まとめて）
+                            th = cio.read_docx(b)
+                            for k, t in th.items():
+                                theaters.setdefault(k, {}).update(t)
+                            report.append(f"✅ {name}：{'・'.join(HALLS[k] for k in th)}の紹介を入れました"); continue
+                        key, t = cio.read_cinema_intro(name, text)
+                        if not key:
+                            report.append(f"⚠️ {name}：どの映画館の紹介文かわかりませんでした（ファイル名に【各務原】などを入れてください）"); continue
+                        if not t:
+                            report.append(f"⚠️ {name}：紹介文の中身を読み取れませんでした"); continue
+                        theaters.setdefault(key, {}).update(t)
+                        report.append(f"✅ {name}：{HALLS[key]}に入れました（{'・'.join({'title':'作品名','date':'公開日','director':'監督','cast':'出演（2人）','copy':'©','body':'紹介文'}[x] for x in t)}）")
+                except Exception as e:
+                    report.append(f"⚠️ {name}：読み込めませんでした（{e}）")
+            data = {"theaters": theaters}
+            if table_changed:
+                data["table"] = sorted_by_date([{k: v for k, v in r.items() if k != "_date"} for r in table])
+            ss["_import_report"] = report
+            ss["_pending"] = (data, None, "映画館のファイルを読み込みました"); st.rerun()
+        for line in ss.get("_import_report", []):
+            st.write(line)
 
 with st.popover("🏠 最初の画面にもどる"):
     st.write("入力した中身と画像は消えます。**先に原稿データをダウンロードしてから**にしてください。")

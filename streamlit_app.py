@@ -10,10 +10,26 @@ import unicodedata
 import streamlit as st
 from PIL import Image
 
+import importlib
+
 import cinema_ai as ai
 import cinema_core as core
 import cinema_io as cio
 import ui_style as ui
+
+# 部品のファイルが新しくなっていたら読み直す（Streamlit Cloud は更新しても部品を古いまま使い続け、
+# 2026-10-28 に「DEFAULT_ORIENT が無い」で落ちた）
+def _fresh(mod):
+    try:
+        t = os.path.getmtime(mod.__file__)
+        if getattr(mod, "_loaded_mtime", None) not in (None, t):
+            mod = importlib.reload(mod)
+        mod._loaded_mtime = t
+    except Exception:
+        pass
+    return mod
+
+core, cio, ai, ui = _fresh(core), _fresh(cio), _fresh(ai), _fresh(ui)
 
 st.set_page_config(page_title="シネマ原稿アプリ", page_icon="🎬", layout="wide")
 ui.apply()  # 見た目をシネマの原稿に合わせる

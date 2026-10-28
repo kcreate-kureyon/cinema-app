@@ -36,16 +36,32 @@ def norm_date(s):
     m = re.match(r"(\d{1,2})\s*/\s*(\d{1,2})", s)
     return f"{int(m.group(1))}/{int(m.group(2))}" if m else s
 
-def norm_table_date(s):
-    """表の公開予定日：12／4（金） の形（テンプレの 00／00（　）に合わせる）"""
-    s = nfc(s).strip()
+def _year_for(month, issue=""):
+    """日付の年：号（2612＝2026年12月号）から。号の月より半年以上前の月なら翌年（12月号の1/5 → 2027年）"""
+    import datetime
+    iss = unicodedata.normalize("NFKC", issue or "").strip()
+    if len(iss) == 4 and iss.isdigit():
+        y, im = 2000 + int(iss[:2]), int(iss[2:])
+    else:
+        t = datetime.date.today(); y, im = t.year, t.month
+    return y + 1 if im - month > 6 else (y - 1 if month - im > 6 else y)
+
+def norm_table_date(s, issue=""):
+    """表の公開予定日：12／4（金） の形（テンプレの 00／00（　）に合わせる）。曜日が無ければ号の年から付ける（YOU 2026-10-28）"""
+    import datetime
+    s = unicodedata.normalize("NFKC", nfc(s)).strip()
     if not s:
         return ""
-    m = re.match(r"(\d{1,2})\s*[/／]\s*(\d{1,2})\s*[（(]?\s*([月火水木金土日祝])?", s)
+    m = re.match(r"(\d{1,2})\s*[/／月]\s*(\d{1,2})\s*日?\s*[（(]?\s*([月火水木金土日祝])?", s)
     if not m:
         return s
-    w = m.group(3)
-    return f"{int(m.group(1))}／{int(m.group(2))}" + (f"（{w}）" if w else "")
+    mo, da, w = int(m.group(1)), int(m.group(2)), m.group(3)
+    if not w:
+        try:
+            w = "月火水木金土日"[datetime.date(_year_for(mo, issue), mo, da).weekday()]
+        except ValueError:
+            w = None
+    return f"{mo}／{da}" + (f"（{w}）" if w else "")
 
 def normalize(data):
     out = {"issue": nfc(data.get("issue", "")).strip(), "theaters": {}, "table": []}
@@ -61,7 +77,7 @@ def normalize(data):
         title = norm_title(r.get("title", ""))
         if not title:
             continue
-        out["table"].append({"date": norm_table_date(r.get("date", "")), "title": title,
+        out["table"].append({"date": norm_table_date(r.get("date", ""), out["issue"]), "title": title,
                              "dots": {k: bool(r.get("dots", {}).get(k)) for k in KEYS}})
     return out
 

@@ -375,3 +375,7 @@ def build(data, images=None):
 def preview_png(pdf_bytes, dpi=110):
     d = fitz.open(stream=pdf_bytes, filetype="pdf")
     return d[0].get_pixmap(dpi=dpi).tobytes("png")
+
+
+# 読み込んだときのファイルの時刻（streamlit_app._fresh が古い部品を読み直すのに使う）
+_loaded_mtime = os.path.getmtime(__file__)

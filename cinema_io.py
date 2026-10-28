@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """シネマアプリの読み書き：シネマ担当者のテキスト(.docx)・スケジュール(.xlsx)の読み込み、
 表記のそろえ（YOU 2026-10-28 の決まり）、原稿データ(.zip)の保存と読み込み。"""
-import html, io, json, re, unicodedata, zipfile
+import html, io, json, os, re, unicodedata, zipfile
 
 KEYS = ["kiso", "kaka", "gifu", "ina"]
 KAN = {"木曽川": "kiso", "各務原": "kaka", "岐阜": "gifu", "稲沢": "ina"}
@@ -151,3 +151,39 @@ def from_zip(b):
         if n in z.namelist():
             images[k] = z.read(n)
     return data, images
+
+
+# ---------------------------------------------------------------- PDFに原稿の中身を入れる（YOU 2026-10-28）
+# 「続きから修正」はダウンロードしたPDFを入れるだけで戻せるように、PDFの添付ファイルとして
+# data.json と画像を入れておく（zipを別に持たなくてよい）。高橋さんの手元の組み上げもこのPDFから読める
+EMB_DATA = "cinema_data.json"
+
+def embed_into_pdf(pdf_bytes, data, images):
+    import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc.embfile_add(EMB_DATA, json.dumps(data, ensure_ascii=False).encode("utf-8"), filename=EMB_DATA, desc="シネマ原稿アプリの原稿データ")
+    for k, img in (images or {}).items():
+        if img:
+            n = f"cinema_img_{k}.jpg"
+            doc.embfile_add(n, img, filename=n, desc=f"シネマ原稿アプリの画像（{k}）")
+    return doc.tobytes(garbage=3, deflate=True)
+
+def from_pdf(b):
+    import fitz
+    doc = fitz.open(stream=b, filetype="pdf")
+    names = doc.embfile_names()
+    if EMB_DATA not in names:
+        raise ValueError("このPDFには原稿の中身が入っていません（このアプリでダウンロードしたPDFを入れてください）")
+    data = json.loads(doc.embfile_get(EMB_DATA).decode("utf-8"))
+    images = {k: doc.embfile_get(f"cinema_img_{k}.jpg") for k in KEYS if f"cinema_img_{k}.jpg" in names}
+    return data, images
+
+def from_file(name, b):
+    """続きから修正：アプリでダウンロードしたPDF（または前の原稿データ.zip）"""
+    if name.lower().endswith(".pdf") or b[:4] == b"%PDF":
+        return from_pdf(b)
+    return from_zip(b)
+
+
+# 読み込んだときのファイルの時刻（streamlit_app._fresh が古い部品を読み直すのに使う）
+_loaded_mtime = os.path.getmtime(__file__)

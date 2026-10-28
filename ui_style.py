@@ -30,6 +30,7 @@ def apply():
     paper = _b64("paper.jpg")
     cinema = _b64("cinema.png")  # 台紙の「CINEMA」の文字だけ（背景が透けた画像）
     k, ka, g, i = (HALL_COLOR[x] for x in ("kiso", "kaka", "gifu", "ina"))
+    no_translate()
     st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
@@ -42,7 +43,7 @@ h1, h2, h3, h4, .app-title, [data-baseweb="tab"] p, .stButton button p, .stDownl
   font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", sans-serif !important; }}
 /* タブ＝ボタン。4館はその館の色・上映作品の表は茶色・確認とダウンロードは赤（YOU 2026-10-28）。選んでいるタブは大きく＋下に線 */
 [data-baseweb="tab-list"] {{ gap: 8px; border-bottom: 3px solid {BROWN}; padding: 6px 8px 8px; flex-wrap: wrap; overflow: visible; }}
-[data-baseweb="tab"] {{ border-radius: 999px; padding: 8px 18px !important; opacity: .82; box-shadow: 0 2px 0 rgba(0,0,0,.15); transition: all .1s; }}
+[data-baseweb="tab"] {{ border-radius: 5px; padding: 8px 16px !important; opacity: .82; box-shadow: 0 2px 0 rgba(0,0,0,.15); transition: all .1s; }}
 [data-baseweb="tab"] p {{ font-weight: 700; font-size: 15px; color: #fff !important; }}
 [data-baseweb="tab"]:nth-child(1) {{ background: {k}; }}
 [data-baseweb="tab"]:nth-child(2) {{ background: {ka}; }}
@@ -78,6 +79,16 @@ h1, h2, h3, h4, .app-title, [data-baseweb="tab"] p, .stButton button p, .stDownl
 """, unsafe_allow_html=True)
 
 
+def no_translate():
+    """ブラウザの自動翻訳で日本語が置き換わらないように（「各務原」→「各業務原」等になった・YOU 2026-10-28）"""
+    import streamlit.components.v1 as components
+    components.html("""<script>
+      try { const d = window.parent.document; d.documentElement.lang = "ja"; d.documentElement.setAttribute("translate", "no");
+            d.body.classList.add("notranslate");
+            if (!d.querySelector('meta[name="google"]')) { const m = d.createElement("meta"); m.name = "google"; m.content = "notranslate"; d.head.appendChild(m); } } catch (e) {}
+    </script>""", height=0)
+
+
 def header():
     """アプリの名前（見出しの画像はなし・背景に大きく CINEMA ／YOU 2026-10-28）"""
     st.markdown("<div class='app-title'>🎬 シネマ原稿アプリ</div>", unsafe_allow_html=True)
@@ -90,3 +101,7 @@ def hall(key, name):
 
 def band(text):
     st.markdown(f"<div class='band'>{text}</div>", unsafe_allow_html=True)
+
+
+# 読み込んだときのファイルの時刻（streamlit_app._fresh が古い部品を読み直すのに使う）
+_loaded_mtime = os.path.getmtime(__file__)

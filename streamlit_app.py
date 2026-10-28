@@ -21,10 +21,8 @@ import ui_style as ui
 # 2026-10-28 に「DEFAULT_ORIENT が無い」で落ちた）
 def _fresh(mod):
     try:
-        t = os.path.getmtime(mod.__file__)
-        if getattr(mod, "_loaded_mtime", None) not in (None, t):
-            mod = importlib.reload(mod)
-        mod._loaded_mtime = t
+        if getattr(mod, "_loaded_mtime", None) != os.path.getmtime(mod.__file__):
+            mod = importlib.reload(mod)   # 部品は読み込んだときに自分の _loaded_mtime を持つ
     except Exception:
         pass
     return mod
@@ -207,12 +205,15 @@ if not ss.get("_started"):
     st.write("")
     s1, s2 = st.columns(2)
     with s1:
-        st.markdown("<div class='start-card'><div class='start-title'>📂 続きから修正</div>前にダウンロードした【原稿データ】（.zip）を入れると、その続きから直せます</div>", unsafe_allow_html=True)
-        z = st.file_uploader("原稿データ（.zip）", type=["zip"], key="start_zip")
+        st.markdown("<div class='start-card'><div class='start-title'>📂 続きから修正</div>このアプリで前にダウンロードした<b>PDF</b>を入れると、その続きから直せます</div>", unsafe_allow_html=True)
+        z = st.file_uploader("前にダウンロードしたPDF", type=["pdf", "zip"], key="start_zip")
         if z and st.button("続きから修正する", type="primary", width="stretch"):
-            data, imgs = cio.from_zip(z.getvalue())
-            ss["_pending"] = (data, imgs, "原稿データを読み込みました。続きから直せます。")
-            ss["_started"] = True; st.rerun()
+            try:
+                data, imgs = cio.from_file(z.name, z.getvalue())
+                ss["_pending"] = (data, imgs, "前の内容を読み込みました。続きから直せます。")
+                ss["_started"] = True; st.rerun()
+            except Exception as e:
+                st.error(str(e))
     with s2:
         st.markdown("<div class='start-card'><div class='start-title'>🆕 新しい号の作成</div>空の状態から作ります（翌月の新しい原稿）。テキストとスケジュールのファイルは、次の画面で読み込めます</div>", unsafe_allow_html=True)
         st.write("")
@@ -271,7 +272,7 @@ for i, k in enumerate(KEYS):
                     w, h = Image.open(io.BytesIO(b)).size
                     ss[f"{k}_orient"] = "yoko" if w > h * 1.05 else "tate"
             st.radio("枠の形", ["tate", "yoko"], key=f"{k}_orient", horizontal=True,
-                     format_func=lambda o: "📱 縦長の枠" if o == "tate" else "🖼 横長の枠",
+                     format_func=lambda o: "縦長の枠" if o == "tate" else "横長の枠",
                      help="画像を入れると自動で選びます。変えたいときはここで選び直せます")
             if ss["images"].get(k):
                 st.image(ss["images"][k], width="stretch")
@@ -328,14 +329,9 @@ with tabs[5]:
             for m in infos:
                 st.write("・" + m)
     name = f"{data['issue'] or '0000'}シネマ"
-    d1, d2 = st.columns(2)
-    with d1:
-        st.download_button("📄 PDFをダウンロード（お客さん確認用）", pdf, file_name=f"{name}.pdf", mime="application/pdf",
-                           width="stretch", on_click="ignore")
-    with d2:
-        st.download_button("💾 原稿データをダウンロード（直しの続き・高橋さんへ）", cio.to_zip(data, ss["images"]),
-                           file_name=f"{name}_原稿データ.zip", mime="application/zip", width="stretch", on_click="ignore")
-    st.caption("OKになったら、PDFと原稿データの2つを高橋さんにメールしてください。")
+    st.download_button("📄 PDFをダウンロード（お客さん確認用・続きの修正にも使えます）", cio.embed_into_pdf(pdf, data, ss["images"]),
+                       file_name=f"{name}.pdf", mime="application/pdf", width="stretch", on_click="ignore")
+    st.caption("このPDFの中に原稿の中身も入っています。直すときは、最初の画面の「続きから修正」にこのPDFを入れてください。OKになったら、このPDFを高橋さんにメールしてください。")
 
     # ---- AIチェック（お知らせ。自動では直さない・失敗してもPDFには関係ない）
     st.divider()

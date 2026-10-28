@@ -177,3 +177,7 @@ def verify_movies(data):
     with ThreadPoolExecutor(max_workers=4) as ex:
         res = dict(zip(todo.keys(), ex.map(one, todo.values())))
     return res
+
+
+# 読み込んだときのファイルの時刻（streamlit_app._fresh が古い部品を読み直すのに使う）
+_loaded_mtime = os.path.getmtime(__file__)

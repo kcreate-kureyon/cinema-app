@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+template/background.pdf
+template/シネマ_base.ai
+template/layout_raw.json

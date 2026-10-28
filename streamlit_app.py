@@ -353,11 +353,20 @@ with tabs[4]:
 with tabs[5]:
     ui.band("確認・ダウンロード")
     data = cio.normalize(collect())
-    try:
-        pdf, report = core.build(data, ss["images"])
-    except Exception as e:
-        st.error(f"PDFを作れませんでした：{e}")
-        st.stop()
+    # 中身が変わらないあいだは、作ったPDFを取っておいて使い回す（毎回作り直すと、ダウンロードの中身が
+    # 押す前に入れ替わって失敗することがあった・YOU 2026-10-28「ダウンロードできない」）
+    import hashlib, json as _json
+    sig = hashlib.sha1((_json.dumps(data, ensure_ascii=False, sort_keys=True) +
+                        "".join(f"{k}:{hashlib.sha1(v).hexdigest()}" for k, v in sorted(ss["images"].items()) if v)).encode()).hexdigest()
+    if ss.get("_pdf_sig") != sig:
+        try:
+            pdf, report = core.build(data, ss["images"])
+            pdf_dl = cio.embed_into_pdf(pdf, data, ss["images"])
+            ss["_pdf"] = (pdf, report, pdf_dl, core.preview_png(pdf, 110)); ss["_pdf_sig"] = sig
+        except Exception as e:
+            st.error(f"PDFを作れませんでした：{e}")
+            st.stop()
+    pdf, report, pdf_dl, preview = ss["_pdf"]
     overs = [m for kind, m in report if kind == "over"]
     infos = [m for kind, m in report if kind == "info"]
     missing = [HALLS[k] for k in KEYS if not ss["images"].get(k)]
@@ -372,7 +381,7 @@ with tabs[5]:
             for m in infos:
                 st.write("・" + m)
     name = f"{data['issue'] or '0000'}シネマ"
-    st.download_button("📄 PDFをダウンロード（お客さん確認用・続きの修正にも使えます）", cio.embed_into_pdf(pdf, data, ss["images"]),
+    st.download_button("📄 PDFをダウンロード（お客さん確認用・続きの修正にも使えます）", pdf_dl,
                        file_name=f"{name}.pdf", mime="application/pdf", width="stretch", on_click="ignore")
     st.caption("このPDFの中に原稿の中身も入っています。直すときは、最初の画面の「続きから修正」にこのPDFを入れてください。OKになったら、このPDFを高橋さんにメールしてください。")
 
@@ -432,4 +441,4 @@ with tabs[5]:
                 for s_ in r.get("sources", []):
                     st.markdown(f"<small>出どころ：<a href='{s_['url']}' target='_blank'>{s_['title']} {s_['url']}</a></small>", unsafe_allow_html=True)
     st.divider()
-    st.image(core.preview_png(pdf, 110), width="stretch")
+    st.image(preview, width="stretch")

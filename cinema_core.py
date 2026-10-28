@@ -18,7 +18,8 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 MM = 2.83465
 LAYOUT = json.load(open(os.path.join(HERE, "template", "layout.json"), encoding="utf-8"))
-BG = os.path.join(HERE, "template", "background_app.pdf")
+BG = os.path.join(HERE, "template", "background_noblock_app.pdf")   # 4館のカメラと線も消した背景（縦横で描き分けるため）
+BG_SRC = os.path.join(HERE, "template", "background_app.pdf")     # カメラの形を取り出す元
 KEYS = ["kiso", "kaka", "gifu", "ina"]
 HALLS = {"kiso": "TOHOシネマズ木曽川", "kaka": "イオンシネマ各務原", "gifu": "TOHOシネマズ岐阜", "ina": "ユナイテッド・シネマ稲沢"}
 
@@ -161,19 +162,82 @@ def gray_box(page, rect_mm):
     r = fitz.Rect(rect_mm["x"] * MM, rect_mm["y"] * MM, (rect_mm["x"] + rect_mm["w"]) * MM, (rect_mm["y"] + rect_mm["h"]) * MM)
     page.draw_rect(r, color=None, fill=(0, 0, 0, 0.35))
 
-TITLE_MAXW = {"kiso": 41, "kaka": 41, "ina": 41, "gifu": 76}  # mm（右はケイ線の手前まで）
-CREDIT_RIGHT = {"kiso": 100.0, "kaka": 198.5, "gifu": 56.5, "ina": 198.5}  # 監督・出演の右端mm（岐阜は紹介文の左まで）
+# ---- 縦の枠・横の枠（YOU 2026-10-28「縦長か横長か自動で読み取って、そっちの枠で」）
+# テンプレの横に置いてある部品と同じ形：縦＝木曽川の枠、横＝岐阜の枠。ほかの館は列・段の分だけずらす
+DEFAULT_ORIENT = {"kiso": "tate", "kaka": "tate", "gifu": "yoko", "ina": "tate"}
+COL = {"kiso": 0, "kaka": 1, "gifu": 0, "ina": 1}
+ROW = {"kiso": 0, "kaka": 0, "gifu": 1, "ina": 1}
+COL_DX, ROW_DY = 98.468, 66.65                     # 右の列・下の段へのずれ（mm）
+BASE = {"tate": "kiso", "yoko": "gifu"}
+CAMERA = {"tate": (46.6, 52.03), "yoko": (11.51, 117.4)}           # カメラの左上（mm・基準の館）
+RULE = {"tate": (46.6, 68.59, 100.01), "yoko": (57.9, 127.25, 100.01)}  # 線 x0, y, x1
+TITLE_MAXW = {"tate": 41, "yoko": 76}             # mm（右はケイ線の手前まで）
+
+def _shift(o, dx, dy):
+    if isinstance(o, dict):
+        r = {}
+        for k, v in o.items():
+            if k == "x" and isinstance(v, (int, float)): r[k] = v + dx
+            elif k == "y" and isinstance(v, (int, float)): r[k] = v + dy
+            else: r[k] = _shift(v, dx, dy)
+        return r
+    return o
+
+def block(key, orient):
+    """館 key を orient（tate/yoko）の枠で組むときの置き場所（mm）"""
+    b = BASE[orient]
+    dx = (COL[key] - COL[b]) * COL_DX
+    dy = (ROW[key] - ROW[b]) * ROW_DY
+    L = _shift(LAYOUT["theaters"][b], dx, dy)
+    cx, cy = CAMERA[orient]; rx0, ry, rx1 = RULE[orient]
+    L["camera"] = (cx + dx, cy + dy)
+    L["rule"] = (rx0 + dx, ry + dy, rx1 + dx)
+    L["credit_right"] = (100.0 + dx) if orient == "tate" else (L["body"]["box"]["x"] - 1.4)
+    L["title_maxw"] = TITLE_MAXW[orient]
+    return L
+
+_CAM = None
+def camera_items():
+    """背景の元から、木曽川のカメラの形（パス）を取り出す（左上を0,0に）"""
+    global _CAM
+    if _CAM is None:
+        p = fitz.open(BG_SRC)[0]
+        x0, y0 = CAMERA["tate"]
+        for dr in p.get_drawings():
+            r = dr["rect"]
+            if abs(r.x0 / MM - x0) < 0.2 and abs(r.y0 / MM - y0) < 0.2 and dr.get("fill"):
+                _CAM = (dr, r.x0, r.y0); break
+    return _CAM
+
+def draw_camera(page, x_mm, y_mm):
+    dr, ox, oy = camera_items()
+    M = fitz.Matrix(1, 0, 0, 1, x_mm * MM - ox, y_mm * MM - oy)
+    sh = page.new_shape()
+    for it in dr["items"]:
+        op = it[0]
+        if op == "l": sh.draw_line(it[1] * M, it[2] * M)
+        elif op == "c": sh.draw_bezier(it[1] * M, it[2] * M, it[3] * M, it[4] * M)
+        elif op == "re": sh.draw_rect(fitz.Rect(it[1]) * M)
+        elif op == "qu": sh.draw_quad(it[1].transform(M))
+    sh.finish(fill=dr["fill"], color=None, even_odd=dr.get("even_odd", False), closePath=dr.get("closePath", True))
+    sh.commit()
+
+def draw_rule(page, x0, y, x1):
+    page.draw_line(fitz.Point(x0 * MM, y * MM), fitz.Point(x1 * MM, y * MM), color=(0.2519, 0.2495, 0.2560), width=0.5)  # テンプレと同じ0.5pt
 
 def theater(page, key, d, img, report):
-    L = LAYOUT["theaters"][key]
+    orient = d.get("orient") or DEFAULT_ORIENT[key]
+    L = block(key, orient)
     bold, med = font("Bold"), font("Medium")
+    draw_camera(page, *L["camera"])
+    draw_rule(page, *L["rule"])
     # 画像
     if img:
         put_image(page, L["image"], img)
     else:
         gray_box(page, L["image"])
     # タイトル（縦の枠は2行まで。1行で入らなければ全角スペースで2行に。1行なら2行分の真ん中へ）
-    T = L["title"]; sz = T["size"]; trk = T["tracking"]; maxw = TITLE_MAXW[key] * MM
+    T = L["title"]; sz = T["size"]; trk = T["tracking"]; maxw = L["title_maxw"] * MM
     lead = T["leading"] * MM
     title = (d.get("title") or "").strip()
     lines = [title]
@@ -200,7 +264,7 @@ def theater(page, key, d, img, report):
     # 監督・出演
     C = L["credit"]
     cr = ["●" + (d.get("director") or "監督／"), "●" + (d.get("cast") or "出演／")]
-    cmax = (CREDIT_RIGHT[key] - C["anchor"]["x"]) * MM
+    cmax = (L["credit_right"] - C["anchor"]["x"]) * MM
     for i, ln in enumerate(cr):
         it = runs(ln, C["size"], False); hs = hs_fit(it, med, cmax, C["tracking"])
         if hs < 100: report.append(("info", f"{HALLS[key]}：「{ln}」に長体{hs}%"))

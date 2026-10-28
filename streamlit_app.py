@@ -35,6 +35,7 @@ def init():
     for k in KEYS:
         for f in FIELDS:
             ss.setdefault(f"{k}_{f}", "出演" if f == "cast_kind" else "")
+        ss.setdefault(f"{k}_orient", core.DEFAULT_ORIENT[k])
     for rid in ss["row_ids"]:
         init_row(rid)
 
@@ -56,6 +57,37 @@ def set_rows(rows):
     for rid, r in zip(ids, rows or [{}]):
         init_row(rid, r)
 
+def sorted_by_date(rows):
+    """公開日順に並べ直す（YOU 2026-10-28）。公開日の入った行から次の公開日までを1つのまとまりとして動かす。
+    同じ日付のまとまりは1つにまとめ、日付は最初の行だけに残す。12月と1月がまたがるときは1月を後ろに"""
+    import re as _re
+    groups, cur = [], None
+    for r in rows:
+        if (r.get("date") or "").strip() or cur is None:
+            cur = {"date": (r.get("date") or "").strip(), "rows": []}; groups.append(cur)
+        cur["rows"].append(r)
+    def md(g):
+        m = _re.match(r"\s*(\d{1,2})\s*[/／]\s*(\d{1,2})", unicodedata.normalize("NFKC", g["date"]))
+        return (int(m.group(1)), int(m.group(2))) if m else None
+    months = [md(g)[0] for g in groups if md(g)]
+    def key(g):
+        v = md(g)
+        if not v: return (-1, 0)               # 日付のないまとまりは先頭のまま
+        mo = v[0] + (12 if months and max(months) - v[0] > 6 else 0)
+        return (mo, v[1])
+    merged = {}
+    order = []
+    for g in sorted(groups, key=key):
+        k = key(g)
+        if k in merged and k != (-1, 0):
+            merged[k]["rows"].extend(g["rows"]); continue
+        merged[k] = g; order.append(g)
+    out = []
+    for g in order:
+        for i, r in enumerate(g["rows"]):
+            out.append({**r, "date": g["date"] if i == 0 else ""})
+    return out
+
 def load_into_state(data, images=None):
     """data（cinema_core の形）を画面に入れる"""
     ss = st.session_state
@@ -72,6 +104,7 @@ def load_into_state(data, images=None):
         ss[f"{k}_cast_name"] = cast.split("／", 1)[1] if "／" in cast else cast
         ss[f"{k}_body"] = t.get("body", "")
         ss[f"{k}_copy"] = t.get("copy", "")
+        ss[f"{k}_orient"] = t.get("orient") or core.DEFAULT_ORIENT[k]
     if data.get("table"):
         set_rows(data["table"])
     if images:
@@ -85,7 +118,7 @@ def collect():
         th[k] = {"title": ss[f"{k}_title"], "date": ss[f"{k}_date"],
                  "director": "監督／" + ss[f"{k}_director_name"].strip(),
                  "cast": ss[f"{k}_cast_kind"] + "／" + ss[f"{k}_cast_name"].strip(),
-                 "body": ss[f"{k}_body"], "copy": ss[f"{k}_copy"]}
+                 "body": ss[f"{k}_body"], "copy": ss[f"{k}_copy"], "orient": ss[f"{k}_orient"]}
     table = []
     for rid in ss["row_ids"]:
         title = (ss.get(f"r{rid}_title") or "").strip()
@@ -198,7 +231,6 @@ tabs = st.tabs(["① 木曽川", "② 各務原", "③ 岐阜", "④ 稲沢", "�
 for i, k in enumerate(KEYS):
     with tabs[i]:
         ui.hall(k, HALLS[k])
-        L = core.LAYOUT["theaters"][k]
         left, right = st.columns([3, 2])
         with left:
             st.text_input("作品名", key=f"{k}_title", help="スペースは自動で全角になります。（午前十時の映画祭16）は自動で小さくなります")
@@ -214,14 +246,21 @@ for i, k in enumerate(KEYS):
             st.caption(f"いま {len(cio.norm_body(ss[f'{k}_body']))} 文字")
             st.text_input("©（コピーライト）", key=f"{k}_copy", help="例：©2026 映画「○○」製作委員会")
         with right:
-            orient = "縦長" if L["image"]["orient"] == "tate" else "横長"
-            img = st.file_uploader(f"画像（{orient}の枠・真ん中で自動トリミング）", type=["jpg", "jpeg", "png"], key=f"{k}_img_up")
+            img = st.file_uploader("画像（縦長か横長かを自動で読み取り、その形の枠で組みます）", type=["jpg", "jpeg", "png"], key=f"{k}_img_up")
             if img is not None:
-                ss["images"][k] = to_jpeg(img.getvalue())
+                b = img.getvalue()
+                if ss.get(f"{k}_img_sig") != (img.name, len(b)):       # 新しい画像のときだけ向きを読み取る
+                    ss[f"{k}_img_sig"] = (img.name, len(b))
+                    ss["images"][k] = to_jpeg(b)
+                    w, h = Image.open(io.BytesIO(b)).size
+                    ss[f"{k}_orient"] = "yoko" if w > h * 1.05 else "tate"
+            st.radio("枠の形", ["tate", "yoko"], key=f"{k}_orient", horizontal=True,
+                     format_func=lambda o: "📱 縦長の枠" if o == "tate" else "🖼 横長の枠",
+                     help="画像を入れると自動で選びます。変えたいときはここで選び直せます")
             if ss["images"].get(k):
                 st.image(ss["images"][k], width="stretch")
                 if st.button("画像を外す", key=f"{k}_img_rm"):
-                    ss["images"].pop(k, None); ss.pop(f"{k}_img_up", None); st.rerun()
+                    ss["images"].pop(k, None); ss.pop(f"{k}_img_up", None); ss.pop(f"{k}_img_sig", None); st.rerun()
 
 # ---------------------------------------------------------------- 表
 with tabs[4]:
@@ -240,7 +279,11 @@ with tabs[4]:
             c[2 + j].checkbox(f"{SHORT[k]}{n}", key=f"r{rid}_{k}", label_visibility="collapsed")
         if c[6].button("✕", key=f"r{rid}_del", help="この行を消す"):
             ss["row_ids"].remove(rid); st.rerun()
-    b1, b2 = st.columns([1, 3])
+    b1, b2, _ = st.columns([1, 1, 2])
+    if b2.button("📅 公開日順に並べ直す", width="stretch", help="公開日を入れた行から次の公開日までを1つのまとまりとして、日付の順に並べます"):
+        rows = [{"date": ss.get(f"r{rid}_date") or "", "title": ss.get(f"r{rid}_title") or "",
+                 "dots": {k: bool(ss.get(f"r{rid}_{k}")) for k in KEYS}} for rid in ss["row_ids"]]
+        ss["_pending"] = ({"table": sorted_by_date(rows)}, None, "公開日順に並べ直しました"); st.rerun()
     if b1.button("＋ 作品を1行足す", width="stretch"):
         rid = ss["next_id"]; ss["next_id"] += 1; ss["row_ids"].append(rid); init_row(rid); st.rerun()
     n = sum(1 for rid in ss["row_ids"] if (ss.get(f"r{rid}_title") or "").strip())

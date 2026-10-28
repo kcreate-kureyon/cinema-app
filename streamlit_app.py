@@ -14,8 +14,10 @@ from PIL import Image
 import cinema_ai as ai
 import cinema_core as core
 import cinema_io as cio
+import ui_style as ui
 
 st.set_page_config(page_title="シネマ原稿アプリ", page_icon="🎬", layout="wide")
+ui.apply()  # 見た目をシネマの原稿に合わせる
 
 KEYS = cio.KEYS
 HALLS = core.HALLS
@@ -114,10 +116,10 @@ def gate():
     if not pw:
         if os.environ.get("CINEMA_APP_DEV") == "1":  # 手元で動かすときだけ合言葉なし
             return
-        st.title("🎬 シネマ原稿アプリ")
+        ui.header()
         st.error("合言葉がまだ設定されていません（高橋さんに連絡してください）")
         st.stop()
-    st.title("🎬 シネマ原稿アプリ")
+    ui.header()
     # パスワード欄（type="password"）だとブラウザが日本語入力を止めるので、普通の欄にする（YOU 2026-10-28）
     v = st.text_input("合言葉を入れてください（ひらがな・カタカナどちらでもOK）")
     if v:
@@ -137,8 +139,9 @@ if "_pending" in ss:
     st.toast(_msg, icon="✅")
 
 # ---------------------------------------------------------------- 上：号と読み込み
-st.title("🎬 シネマ原稿アプリ")
-st.caption("映画館が選ぶ 今月の1本。｜入力すると、くれよんのページの形でPDFができます")
+ui.header()
+st.markdown("<div class='cine-note'>🎬 <b>シネマ原稿アプリ</b>｜入力すると、くれよんのページの形でPDFができます</div>", unsafe_allow_html=True)
+st.write("")
 
 c1, c2 = st.columns([1, 3])
 with c1:
@@ -156,12 +159,12 @@ with c2:
         if up_xlsx and st.button("スケジュールを読み込む"):
             ss["_pending"] = ({"table": cio.read_xlsx(up_xlsx.getvalue())}, None, "上映作品の表を入れました。"); st.rerun()
 
-tabs = st.tabs([f"① {HALLS['kiso']}", f"② {HALLS['kaka']}", f"③ {HALLS['gifu']}", f"④ {HALLS['ina']}",
-                "⑤ 上映作品の表", "✅ 確認・ダウンロード"])
+tabs = st.tabs(["① 木曽川", "② 各務原", "③ 岐阜", "④ 稲沢", "⑤ 上映作品の表", "⑥ 確認・ダウンロード"])
 
 # ---------------------------------------------------------------- 4館
 for i, k in enumerate(KEYS):
     with tabs[i]:
+        ui.hall(k, HALLS[k])
         L = core.LAYOUT["theaters"][k]
         left, right = st.columns([3, 2])
         with left:
@@ -189,6 +192,7 @@ for i, k in enumerate(KEYS):
 
 # ---------------------------------------------------------------- 表
 with tabs[4]:
+    ui.band("上映作品名")
     st.markdown("公開日は、その日の**最初の作品の行だけ**に入れます（例：12/4(金)）。25作品まで。作品の数だけ段ができます。")
     st.caption("「～12/10(木)」のような上映終了日は自動で取ります。スペースは自動で全角（長すぎる作品は半角）になります。")
     df = st.data_editor(ss["table_df"], num_rows="dynamic", width="stretch", key=f"table_editor_{ss['table_ver']}",
@@ -201,6 +205,7 @@ with tabs[4]:
 
 # ---------------------------------------------------------------- 確認・ダウンロード
 with tabs[5]:
+    ui.band("確認・ダウンロード")
     data = cio.normalize(collect())
     try:
         pdf, report = core.build(data, ss["images"])

@@ -140,7 +140,7 @@ if "_pending" in ss:
 
 # ---------------------------------------------------------------- 上：号と読み込み
 ui.header()
-st.markdown("<div class='cine-note'>🎬 <b>シネマ原稿アプリ</b>｜入力すると、くれよんのページの形でPDFができます</div>", unsafe_allow_html=True)
+st.markdown("<div class='cine-note'>入力すると、くれよん「映画館が選ぶ 今月の1本。」のページの形でPDFができます</div>", unsafe_allow_html=True)
 st.write("")
 
 c1, c2 = st.columns([1, 3])

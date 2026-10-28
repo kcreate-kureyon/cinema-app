@@ -114,7 +114,7 @@ def gate():
     st.title("🎬 シネマ原稿アプリ")
     v = st.text_input("合言葉を入れてください", type="password")
     if v:
-        if hmac.compare_digest(v.strip(), pw):
+        if hmac.compare_digest(v.strip().encode("utf-8"), pw.strip().encode("utf-8")):  # 日本語の合言葉でも比べられるようにbytesで
             st.session_state["_ok"] = True
             st.rerun()
         st.error("合言葉がちがいます")

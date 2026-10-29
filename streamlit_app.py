@@ -293,7 +293,7 @@ for i, k in enumerate(KEYS):
         ui.hall(k, HALLS[k])
         left, right = st.columns([3, 2])
         with left:
-            st.text_input("作品名", key=f"{k}_title", help="スペースは自動で全角になります。（午前十時の映画祭16）は自動で小さくなります")
+            st.text_input("作品名", key=f"{k}_title", help="スペースは自動で全角になります（英語のつづりの単語の間は半角）。（午前十時の映画祭16）は自動で小さくなります")
             st.text_input("公開日（例：12/25）", key=f"{k}_date")
             st.text_input("監督", key=f"{k}_director_name", help="例：瀬々敬久")
             cc1, cc2 = st.columns([1, 3])
@@ -326,7 +326,7 @@ for i, k in enumerate(KEYS):
 with tabs[4]:
     ui.band("上映作品名")
     st.markdown("公開日は、その日の**最初の作品の行だけ**に入れます（例：12/4(金)）。25作品まで。作品の数だけ段ができます。")
-    st.caption("「～12/10(木)」のような上映終了日は自動で取ります。スペースは自動で全角（長すぎる作品は半角）になります。")
+    st.caption("「～12/10(木)」のような上映終了日は自動で取ります。スペースは自動で全角（英語のつづりの単語の間と、長すぎる作品は半角）になります。")
     w = [1.3, 5, .8, .8, .8, .8, .6]
     h = st.columns(w)
     for col, lab in zip(h, ["公開日", "作品名"] + [SHORT[k] for k in KEYS] + [""]):

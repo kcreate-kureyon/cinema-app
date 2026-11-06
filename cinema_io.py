@@ -10,6 +10,24 @@ FEST = re.compile(r"[（(]午前十時の映画祭\s*(\d*)[）)]")
 def nfc(s):
     return unicodedata.normalize("NFC", s or "")
 
+# R指定（YOU 2026-11-06「R15以外もR指定あったら入れて」）：R15+・R18+。作品名のうしろに（R15+）の形で入れる
+RATE = re.compile(r"[RＲ]\s*[-‐ー－]?\s*(15|18|１５|１８)\s*[+＋]?")
+RATE_TAG = re.compile(r"[（(]\s*[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?\s*[）)]")
+
+def rating_of(*texts):
+    """文の中の R15+／R18+ を見つける（無ければ ""）"""
+    for t in texts:
+        m = RATE.search(unicodedata.normalize("NFKC", nfc(t or "")))
+        if m:
+            return f"R{m.group(1)}+"
+    return ""
+
+def with_rating(title, rate):
+    """作品名に（R15+）を付ける。もう付いていれば形だけそろえる"""
+    title = RATE_TAG.sub("", nfc(title)).rstrip()
+    title = re.sub(r"[ 　]*[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?\s*$", "", title)   # うしろに裸で付いた「R15+」も外す
+    return title + (f"（{rate}）" if rate else "")
+
 # ---------------------------------------------------------------- 表記のそろえ
 # 英語のつづりの文字（前後がこれ同士なら、間のスペースは半角にする）
 LATIN = r"[A-Za-zＡ-Ｚａ-ｚ0-9０-９'’&.,!?:\-]"
@@ -28,7 +46,9 @@ def fest_norm(s):
     return FEST.sub(lambda m: "（午前十時の映画祭" + m.group(1) + "）", s)
 
 def norm_title(s):
-    return fest_norm(zen_space(cut_made(nfc(s))))
+    t = fest_norm(zen_space(cut_made(nfc(s))))
+    m = RATE_TAG.search(t)
+    return with_rating(t, rating_of(m.group(0))) if m else t
 
 def norm_body(s):
     """“ ”はできるだけ『』に"""
@@ -147,6 +167,8 @@ def read_xlsx(b):
         t = r.get("B", "").strip()
         if not t or t.startswith("★"):
             continue
+        rt = rating_of(*[v for c, v in r.items() if c not in ("A",)])   # 作品名や別の列に R15+ などがあれば作品名に付ける
+        if rt: t = with_rating(t, rt)
         table.append({"date": r.get("A", "").strip(), "title": t,
                       "dots": {k: r.get(c, "").strip() in ("●", "○", "〇", "1") for k, c in cols.items()}})
     return table
@@ -300,7 +322,8 @@ def read_cinema_schedule(name, b, month=None):
             continue
         if month and cur.month != month:
             continue
-        items.append((cur, r[ct].strip()))
+        rt = rating_of(*[v for c, v in r.items() if c != cd])
+        items.append((cur, with_rating(r[ct].strip(), rt) if rt else r[ct].strip()))
     return key, items
 
 def read_cinema_intro(name, text):
@@ -321,7 +344,9 @@ def read_cinema_intro(name, text):
         return ""
     t = {}
     title = pick("タイトル", "作品名")
-    if title: t["title"] = title
+    if title:
+        rt = rating_of(title, pick("レイティング", "区分", "指定", "年齢"))
+        t["title"] = with_rating(title, rt) if rt else title
     d = to_date(pick("公開日"))
     if d: t["date"] = f"{d.month}/{d.day}"
     if pick("監督"): t["director"] = "監督／" + re.sub(r"\s*[／/、,]\s*", "　", pick("監督")).strip()
@@ -361,13 +386,57 @@ def merge_schedule(table, key, items):
             if not hit["dots"].get(key): marked += 1
             hit["dots"][key] = True
             new, slash = zen_space(title), lambda t: ("／" in t or "/" in t)
-            if not slash(new) and (slash(hit["title"]) or len(new) > len(hit["title"])):
-                hit["title"] = new                     # 「／」なしの書き方・長い（正式な）作品名のほうを使う
+            if (slash(new) and not slash(hit["title"])) or (slash(new) == slash(hit["title"]) and len(new) > len(hit["title"])):
+                hit["title"] = new                     # 11/06 YOU（2612ペアチェック）：正式タイトルの「／」は入れる → 「／」ありの書き方・長い（正式な）作品名のほうを使う
+            rt = rating_of(new, hit["title"])
+            if rt: hit["title"] = with_rating(hit["title"], rt)
             continue
         r = {"date": table_date(d), "title": zen_space(title), "dots": {k: (k == key) for k in KEYS}}
         table.append(r); added += 1
     return table, added, marked
 
+
+# ---------------------------------------------------------------- 注意（お知らせ・自動では直さない）
+def _md(s):
+    m = re.search(r"(\d{1,2})\s*[/／月]\s*(\d{1,2})", unicodedata.normalize("NFKC", nfc(s or "")))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+def checks(raw, data):
+    """raw＝そろえる前（「〜12/10」が残っている）・data＝そろえた後。注意の文の一覧（2026-11-06 YOU・2612ペアチェックの指摘から）"""
+    out = []
+    raw_titles = [r.get("title", "") for r in raw.get("table", [])] + [t.get("title", "") for t in raw.get("theaters", {}).values()]
+    # ① 期間上映（〇〇映画祭・「〜12/10」まで）→ 始まる日の段か聞くだけ
+    seen = set()
+    for t in raw_titles:
+        t = nfc(t or "")
+        if not t.strip():
+            continue
+        if FEST.search(t) or re.search(r"映画祭|[～〜~]\s*\d{1,2}\s*[/／月]\s*\d{1,2}", t):
+            name = norm_title(t)
+            if title_key(name) in seen:
+                continue
+            seen.add(title_key(name))
+            out.append(f"「{name}」は期間上映かもしれません。表の公開予定日は、始まる日でなくていいですか？")
+    # ② 上の紹介と下の表で、同じ作品の公開日がそろっているか
+    cur, rows = "", []
+    for r in data.get("table", []):
+        if (r.get("date") or "").strip():
+            cur = r["date"]
+        rows.append((cur, r.get("title", "")))
+    for k, t in data.get("theaters", {}).items():
+        if not (t.get("title") or "").strip():
+            continue
+        tk = title_key(t["title"])
+        for d, title in rows:
+            if _same(title_key(title), tk):
+                a, b = _md(t.get("date")), _md(d)
+                if a and b and a != b:
+                    out.append(f"「{t['title']}」の公開日が、上の紹介（{a[0]}/{a[1]}）と下の表（{b[0]}/{b[1]}）でちがいます")
+                rt_a, rt_b = rating_of(t["title"]), rating_of(title)
+                if rt_a != rt_b:
+                    out.append(f"「{t['title']}」のR指定（{rt_a or 'なし'}）が、下の表（{rt_b or 'なし'}）とちがいます")
+                break
+    return out
 
 # 読み込んだときのファイルの時刻（streamlit_app._fresh が古い部品を読み直すのに使う）
 _loaded_mtime = os.path.getmtime(__file__)

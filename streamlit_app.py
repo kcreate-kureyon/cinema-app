@@ -376,6 +376,9 @@ with tabs[5]:
         st.warning("画像がまだ入っていません：" + "、".join(missing))
     if not overs:
         st.success("あふれている所はありません。")
+    # 11/06 YOU：注意のメッセージ（自動では直さない）
+    for m in cio.checks(collect(), data):
+        st.warning("⚠️ " + m)
     if infos:
         with st.expander("自動で調整した所（長体など）"):
             for m in infos:

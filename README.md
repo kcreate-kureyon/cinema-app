@@ -16,7 +16,7 @@ YOUの依頼・決まり：secretary/notes/2026-10-28-decisions.md（シネマ�
 
 ## 手元で動かす
 ```
-CINEMA_APP_DEV=1 /Users/kc02/.company/engineering/atagen-app/gradio/.venv/bin/streamlit run streamlit_app.py --server.port 8531
+CINEMA_APP_DEV=1 .venv/bin/python -m streamlit run streamlit_app.py --server.port 8531
 ```
 
 ## ベースが変わったとき

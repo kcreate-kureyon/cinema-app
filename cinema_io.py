@@ -10,22 +10,22 @@ FEST = re.compile(r"[（(]午前十時の映画祭\s*(\d*)[）)]")
 def nfc(s):
     return unicodedata.normalize("NFC", s or "")
 
-# R指定（YOU 2026-11-06「R15以外もR指定あったら入れて」）：R15+・R18+。作品名のうしろに（R15+）の形で入れる
-RATE = re.compile(r"[RＲ]\s*[-‐ー－]?\s*(15|18|１５|１８)\s*[+＋]?")
-RATE_TAG = re.compile(r"[（(]\s*[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?\s*[）)]")
+# R指定（YOU 2026-11-06「R15以外もR指定あったら入れて」「R12も追加」）：R15+・R18+・PG12。作品名のうしろに（R15+）の形で小さく入れる
+RATE = re.compile(r"(?:[RＲ]\s*[-‐ー－]?\s*(15|18|１５|１８)\s*[+＋]?)|(?:[PＰ][GＧ]\s*[-‐ー－]?\s*(12|１２))")   # 11/06 YOU「R12も追加」＝PG12
+RATE_TAG = re.compile(r"[（(]\s*(?:[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?|[PＰ][GＧ]\s*[-‐ー－]?\s*(?:12|１２))\s*[）)]")
 
 def rating_of(*texts):
     """文の中の R15+／R18+ を見つける（無ければ ""）"""
     for t in texts:
         m = RATE.search(unicodedata.normalize("NFKC", nfc(t or "")))
         if m:
-            return f"R{m.group(1)}+"
+            return f"R{m.group(1)}+" if m.group(1) else "PG12"
     return ""
 
 def with_rating(title, rate):
     """作品名に（R15+）を付ける。もう付いていれば形だけそろえる"""
     title = RATE_TAG.sub("", nfc(title)).rstrip()
-    title = re.sub(r"[ 　]*[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?\s*$", "", title)   # うしろに裸で付いた「R15+」も外す
+    title = re.sub(r"[ 　]*(?:[RＲ]\s*[-‐ー－]?\s*(?:15|18|１５|１８)\s*[+＋]?|[PＰ][GＧ]\s*[-‐ー－]?\s*(?:12|１２))\s*$", "", title)   # うしろに裸で付いた「R15+」も外す
     return title + (f"（{rate}）" if rate else "")
 
 # ---------------------------------------------------------------- 表記のそろえ

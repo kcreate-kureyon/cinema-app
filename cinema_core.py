@@ -13,6 +13,7 @@
 import io, json, os, re
 
 import fitz
+import cinema_io as cio   # R指定の形（11/06）
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,10 +42,12 @@ HANG = set("、。，．")
 # ---------------------------------------------------------------- 文字のかたまり
 # 1文字＝(文字, 大きさpt)。長体 hs（%）とトラッキング（1/1000em）は行ごと
 def runs(text, size, fest=True):
-    """（午前十時の映画祭16）の部分は75%（YOU 10/28）"""
-    out, m = [], FEST_RE.search(text) if fest else None
+    """（午前十時の映画祭16）の部分は75%（YOU 10/28）。（R15+）（R18+）（PG12）も同じく小さく（YOU 11/06「タイトルの横に小さく」）"""
+    out = []
+    spans = [(x.start(), x.end()) for x in FEST_RE.finditer(text)] if fest else []
+    spans += [(x.start(), x.end()) for x in cio.RATE_TAG.finditer(text)]
     for i, ch in enumerate(text):
-        small = m is not None and m.start() <= i < m.end()
+        small = any(a <= i < b for a, b in spans)
         out.append((ch, size * 0.75 if small else size))
     return out
 
